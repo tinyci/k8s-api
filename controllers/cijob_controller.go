@@ -136,6 +136,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	return defaultResult, nil
 }
 
+// SetupWithManager sets up the manager by installing the controller
 func (r *CIJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&objectsv1alpha1.CIJob{}).
