@@ -1,0 +1,7 @@
+domain: tinyci.org
+repo: github.com/tinyci/k8s-api
+resources:
+- group: objects
+  kind: CIJob
+  version: v1alpha1
+version: "2"

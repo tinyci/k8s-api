@@ -1,0 +1,7 @@
+apiVersion: objects.tinyci.org/v1alpha1
+kind: CIJob
+metadata:
+  name: cijob-sample
+spec:
+  # Add fields here
+  foo: bar

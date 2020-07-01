@@ -1,0 +1,8 @@
+apiVersion: objects.tinyci.org/v1alpha1
+kind: CIJob
+metadata:
+  namespace: runs
+  name: job
+spec:
+  image: "ubuntu:20.04"
+  command: [ "ls", "-l" ]

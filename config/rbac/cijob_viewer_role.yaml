@@ -1,0 +1,20 @@
+# permissions for end users to view cijobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cijob-viewer-role
+rules:
+- apiGroups:
+  - objects.tinyci.org
+  resources:
+  - cijobs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - objects.tinyci.org
+  resources:
+  - cijobs/status
+  verbs:
+  - get
