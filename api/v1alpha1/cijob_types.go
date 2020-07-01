@@ -1,7 +1,9 @@
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -30,6 +32,26 @@ type CIJob struct {
 
 	Spec   CIJobSpec   `json:"spec,omitempty"`
 	Status CIJobStatus `json:"status,omitempty"`
+}
+
+// Pod returns a pod with a spec relative to this CIJob.
+func (job *CIJob) Pod(nsName types.NamespacedName) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: nsName.Namespace,
+			Name:      nsName.Name,
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "ci-run",
+					Image:   job.Spec.Image,
+					Command: job.Spec.Command,
+				},
+			},
+		},
+	}
 }
 
 // +kubebuilder:object:root=true

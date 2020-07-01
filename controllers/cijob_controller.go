@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -124,23 +123,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	_, err := r.getPod(ctx, req)
 	if err != nil {
-		err := r.Client.Create(ctx, &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: req.Namespace,
-				Name:      req.Name + "-pod",
-			},
-			Spec: corev1.PodSpec{
-				RestartPolicy: corev1.RestartPolicyNever,
-				Containers: []corev1.Container{
-					{
-						Name:    "test",
-						Image:   cijob.Spec.Image,
-						Command: cijob.Spec.Command,
-					},
-				},
-			},
-		})
-		if err != nil {
+		if err := r.Client.Create(ctx, cijob.Pod(getPodName(req))); err != nil {
 			return defaultResult, err
 		}
 
