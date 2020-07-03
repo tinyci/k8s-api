@@ -40,9 +40,28 @@ spec:
               type: array
             image:
               type: string
+            repository:
+              description: CIJobRepository represents a repository that needs to be
+                cloned for the test to run
+              properties:
+                target_path:
+                  type: string
+                token:
+                  type: string
+                url:
+                  type: string
+              required:
+              - target_path
+              - token
+              - url
+              type: object
+            workdir:
+              type: string
           required:
           - command
           - image
+          - repository
+          - workdir
           type: object
         status:
           description: CIJobStatus defines the observed state of CIJob

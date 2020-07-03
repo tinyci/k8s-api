@@ -6,11 +6,13 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	sourcev1alpha1 "github.com/fluxcd/source-controller/api/v1alpha1"
 	objectsv1alpha1 "github.com/tinyci/k8s-api/api/v1alpha1"
 )
 
@@ -42,12 +44,24 @@ func (r *CIJobReconciler) getPodLogger(req ctrl.Request) logr.Logger {
 	return r.Log.WithValues("cijob", req.NamespacedName, "pod", getPodName(req))
 }
 
-func getPodName(req ctrl.Request) types.NamespacedName {
+func getName(req ctrl.Request, append string) types.NamespacedName {
 	nsName := req.NamespacedName
 	// FIXME this should probably be less stupid
-	nsName.Name += "-pod"
+	nsName.Name += "-" + append
 
 	return nsName
+}
+
+func getPodName(req ctrl.Request) types.NamespacedName {
+	return getName(req, "pod")
+}
+
+func getGitName(req ctrl.Request) types.NamespacedName {
+	return getName(req, "git")
+}
+
+func getSecretName(req ctrl.Request) types.NamespacedName {
+	return getName(req, "secret")
 }
 
 func getState(pod *corev1.Pod) *corev1.ContainerStateTerminated {
@@ -121,15 +135,85 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return defaultResult, client.IgnoreNotFound(err)
 	}
 
+	if err := cijob.Validate(); err != nil {
+		r.Log.Error(err, "encountered cijob validation error")
+		return defaultResult, err
+	}
+
 	_, err := r.getPod(ctx, req)
 	if err != nil {
+		sn := getSecretName(req)
+		gn := getGitName(req)
+
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: sn.Namespace,
+				Name:      sn.Name,
+			},
+			StringData: map[string]string{
+				"username": "",
+				"password": cijob.Spec.Repository.Token,
+			},
+		}
+
+		if err := r.Client.Delete(ctx, secret); client.IgnoreNotFound(err) != nil {
+			return defaultResult, err
+		}
+
+		if err := r.Client.Create(ctx, secret); err != nil {
+			return defaultResult, err
+		}
+
+		repo := &sourcev1alpha1.GitRepository{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: gn.Namespace,
+				Name:      gn.Name,
+			},
+			Spec: sourcev1alpha1.GitRepositorySpec{
+				URL:       cijob.Spec.Repository.URL,
+				Interval:  metav1.Duration{Duration: time.Hour},
+				SecretRef: &corev1.LocalObjectReference{Name: getSecretName(req).Name},
+			},
+		}
+
+		if err := r.Client.Delete(ctx, repo); client.IgnoreNotFound(err) != nil {
+			return defaultResult, err
+		}
+
+		if err := r.Client.Create(ctx, repo); err != nil {
+			return defaultResult, err
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				// FIXME probably need to cleanup here
+				return defaultResult, ctx.Err()
+			default:
+			}
+
+			fetchedRepo := &sourcev1alpha1.GitRepository{}
+
+			if err := r.Client.Get(ctx, gn, fetchedRepo); err != nil {
+				return defaultResult, err
+			}
+
+			if fetchedRepo.Status.Artifact != nil && fetchedRepo.Status.Artifact.URL != "" {
+				r.Log.Info("fetched repository, moving forward with create", "artifact", fetchedRepo.Status.Artifact.URL)
+				break
+			}
+		}
+
+		// FIXME sew artifact into container image
+
 		if err := r.Client.Create(ctx, cijob.Pod(getPodName(req))); err != nil {
 			return defaultResult, err
 		}
 
 		go r.supervisePod(ctx, req)
 
-		cijob.Status.PodName = getPodName(req).String()
+		// only the name can be used here, otherwise badness in the runner. We already know the namespace.
+		cijob.Status.PodName = getPodName(req).Name
 		return defaultResult, r.Update(ctx, cijob)
 	}
 
@@ -140,5 +224,8 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 func (r *CIJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&objectsv1alpha1.CIJob{}).
+		Owns(&sourcev1alpha1.GitRepository{}).
+		Owns(&corev1.Secret{}).
+		Owns(&corev1.Pod{}).
 		Complete(r)
 }
