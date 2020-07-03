@@ -106,7 +106,7 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 		}
 	}
 
-	podLog.Info("giving up after 5 tries to reconcile")
+	podLog.Info("giving up after 5 errors to reconcile")
 }
 
 func (r *CIJobReconciler) safeDelete(ctx context.Context, nsName types.NamespacedName, obj runtime.Object) error {
