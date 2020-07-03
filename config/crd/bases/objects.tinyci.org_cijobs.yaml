@@ -44,16 +44,16 @@ spec:
               description: CIJobRepository represents a repository that needs to be
                 cloned for the test to run
               properties:
-                target_path:
-                  type: string
                 token:
                   type: string
                 url:
                   type: string
+                username:
+                  type: string
               required:
-              - target_path
               - token
               - url
+              - username
               type: object
             workdir:
               type: string
