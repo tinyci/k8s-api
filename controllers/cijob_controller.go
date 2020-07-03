@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -108,6 +109,20 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 	podLog.Info("giving up after 5 tries to reconcile")
 }
 
+func (r *CIJobReconciler) safeDelete(ctx context.Context, nsName types.NamespacedName, obj runtime.Object) error {
+	if err := r.Get(ctx, nsName, obj); !apierrors.IsNotFound(err) {
+		return client.IgnoreNotFound(r.Delete(ctx, obj))
+	}
+
+	return nil
+}
+
+type deleteItem struct {
+	logName string
+	nsName  types.NamespacedName
+	obj     runtime.Object
+}
+
 // +kubebuilder:rbac:groups=objects.tinyci.org,resources=cijobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=objects.tinyci.org,resources=cijobs/status,verbs=get;update;patch
 
@@ -121,18 +136,32 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
 		log.Info("cijob removed")
 
-		pod, err := r.getPod(ctx, req)
-		if err != nil {
-			return defaultResult, client.IgnoreNotFound(err)
+		toDelete := []deleteItem{
+			{
+				logName: "git repository",
+				nsName:  getGitName(req),
+				obj:     &sourcev1alpha1.GitRepository{},
+			},
+			{
+				logName: "git secrets",
+				nsName:  getSecretName(req),
+				obj:     &corev1.Secret{},
+			},
+			{
+				logName: "pod",
+				nsName:  getPodName(req),
+				obj:     &corev1.Pod{},
+			},
 		}
 
-		r.getPodLogger(req).Info("deleting pod")
-
-		if err := r.Delete(ctx, pod); err != nil {
-			return defaultResult, err
+		for _, del := range toDelete {
+			r.Log.Info("deleting resource", "type", del.logName)
+			if err := r.safeDelete(ctx, del.nsName, del.obj); err != nil {
+				return defaultResult, err
+			}
 		}
 
-		return defaultResult, client.IgnoreNotFound(err)
+		return defaultResult, nil
 	}
 
 	if err := cijob.Validate(); err != nil {
@@ -151,7 +180,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 				Name:      sn.Name,
 			},
 			StringData: map[string]string{
-				"username": "",
+				"username": cijob.Spec.Repository.Username,
 				"password": cijob.Spec.Repository.Token,
 			},
 		}
@@ -194,7 +223,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 			fetchedRepo := &sourcev1alpha1.GitRepository{}
 
-			if err := r.Client.Get(ctx, gn, fetchedRepo); err != nil {
+			if err := r.Client.Get(ctx, gn, fetchedRepo); client.IgnoreNotFound(err) != nil {
 				return defaultResult, err
 			}
 
