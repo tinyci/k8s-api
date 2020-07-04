@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
+	sourcev1alpha1 "github.com/fluxcd/source-controller/api/v1alpha1"
 )
 
 // ErrValidation is for validation errors
@@ -113,6 +116,38 @@ func (job *CIJob) Pod(nsName types.NamespacedName) *corev1.Pod {
 					Command: job.Spec.Command,
 				},
 			},
+		},
+	}
+}
+
+// GitRepository returns a fluxcd/source-controller compatible repository
+// object suitable for programming the source-controller. A secret must already
+// be created in the namespace for the GitRepository, and its name must be
+// passed.
+func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sourcev1alpha1.GitRepository {
+	return &sourcev1alpha1.GitRepository{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: gn.Namespace,
+			Name:      gn.Name,
+		},
+		Spec: sourcev1alpha1.GitRepositorySpec{
+			URL:       job.Spec.Repository.URL,
+			Interval:  metav1.Duration{Duration: time.Hour},
+			SecretRef: &corev1.LocalObjectReference{Name: secretName},
+		},
+	}
+}
+
+// Secret returns a secret capable of pulling a git repository
+func (job *CIJob) Secret(nsName types.NamespacedName) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: nsName.Namespace,
+			Name:      nsName.Name,
+		},
+		StringData: map[string]string{
+			"username": job.Spec.Repository.Username,
+			"password": job.Spec.Repository.Token,
 		},
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -171,19 +170,10 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	_, err := r.getPod(ctx, req)
 	if err != nil {
-		sn := getSecretName(req)
 		gn := getGitName(req)
+		sn := getSecretName(req)
 
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: sn.Namespace,
-				Name:      sn.Name,
-			},
-			StringData: map[string]string{
-				"username": cijob.Spec.Repository.Username,
-				"password": cijob.Spec.Repository.Token,
-			},
-		}
+		secret := cijob.Secret(sn)
 
 		if err := r.Client.Delete(ctx, secret); client.IgnoreNotFound(err) != nil {
 			return defaultResult, err
@@ -193,17 +183,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 			return defaultResult, err
 		}
 
-		repo := &sourcev1alpha1.GitRepository{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: gn.Namespace,
-				Name:      gn.Name,
-			},
-			Spec: sourcev1alpha1.GitRepositorySpec{
-				URL:       cijob.Spec.Repository.URL,
-				Interval:  metav1.Duration{Duration: time.Hour},
-				SecretRef: &corev1.LocalObjectReference{Name: getSecretName(req).Name},
-			},
-		}
+		repo := cijob.GitRepository(gn, sn.Name)
 
 		if err := r.Client.Delete(ctx, repo); client.IgnoreNotFound(err) != nil {
 			return defaultResult, err
