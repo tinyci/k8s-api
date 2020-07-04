@@ -49,17 +49,15 @@ func (spec CIJobSpec) Validate() error {
 
 // CIJobRepository represents a repository that needs to be cloned for the test to run
 type CIJobRepository struct {
-	URL      string `json:"url"`
-	Username string `json:"username"`
-	Token    string `json:"token"`
+	URL        string `json:"url"`
+	SecretName string `json:"secret_name"`
 }
 
 // Validate validates the repository information
 func (repo *CIJobRepository) Validate() error {
 	lenCheck := map[string]int{
-		"url":      len(repo.URL),
-		"token":    len(repo.Token),
-		"username": len(repo.Username),
+		"url":         len(repo.URL),
+		"secret_name": len(repo.SecretName),
 	}
 
 	for key, length := range lenCheck {
@@ -133,20 +131,6 @@ func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sou
 			URL:       job.Spec.Repository.URL,
 			Interval:  metav1.Duration{Duration: time.Hour},
 			SecretRef: &corev1.LocalObjectReference{Name: secretName},
-		},
-	}
-}
-
-// Secret returns a secret capable of pulling a git repository
-func (job *CIJob) Secret(nsName types.NamespacedName) *corev1.Secret {
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: nsName.Namespace,
-			Name:      nsName.Name,
-		},
-		StringData: map[string]string{
-			"username": job.Spec.Repository.Username,
-			"password": job.Spec.Repository.Token,
 		},
 	}
 }

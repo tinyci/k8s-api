@@ -65,10 +65,6 @@ func getGitName(req ctrl.Request) types.NamespacedName {
 	return getName(req, "git")
 }
 
-func getSecretName(req ctrl.Request) types.NamespacedName {
-	return getName(req, "secret")
-}
-
 func getState(pod *corev1.Pod) *corev1.ContainerStateTerminated {
 	return pod.Status.ContainerStatuses[0].State.Terminated
 }
@@ -167,11 +163,6 @@ func (r *CIJobReconciler) removeJob(ctx context.Context, req ctrl.Request) error
 			obj:     &sourcev1alpha1.GitRepository{},
 		},
 		{
-			logName: "git secrets",
-			nsName:  getSecretName(req),
-			obj:     &corev1.Secret{},
-		},
-		{
 			logName: "pod",
 			nsName:  getPodName(req),
 			obj:     &corev1.Pod{},
@@ -190,13 +181,8 @@ func (r *CIJobReconciler) removeJob(ctx context.Context, req ctrl.Request) error
 
 func (r *CIJobReconciler) buildJob(ctx context.Context, req ctrl.Request, cijob *objectsv1alpha1.CIJob) error {
 	gn := getGitName(req)
-	sn := getSecretName(req)
 
-	if err := r.safeCreate(ctx, cijob.Secret(sn)); err != nil {
-		return err
-	}
-
-	if err := r.safeCreate(ctx, cijob.GitRepository(gn, sn.Name)); err != nil {
+	if err := r.safeCreate(ctx, cijob.GitRepository(gn, cijob.Spec.Repository.SecretName)); err != nil {
 		return err
 	}
 
@@ -258,7 +244,6 @@ func (r *CIJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&objectsv1alpha1.CIJob{}).
 		Owns(&sourcev1alpha1.GitRepository{}).
-		Owns(&corev1.Secret{}).
 		Owns(&corev1.Pod{}).
 		Complete(r)
 }
