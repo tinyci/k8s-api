@@ -116,6 +116,14 @@ func (r *CIJobReconciler) safeDelete(ctx context.Context, nsName types.Namespace
 	return nil
 }
 
+func (r *CIJobReconciler) safeCreate(ctx context.Context, obj runtime.Object) error {
+	if err := r.Client.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {
+		return err
+	}
+
+	return r.Client.Create(ctx, obj)
+}
+
 type deleteItem struct {
 	logName string
 	nsName  types.NamespacedName
@@ -173,23 +181,11 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		gn := getGitName(req)
 		sn := getSecretName(req)
 
-		secret := cijob.Secret(sn)
-
-		if err := r.Client.Delete(ctx, secret); client.IgnoreNotFound(err) != nil {
+		if err := r.safeCreate(ctx, cijob.Secret(sn)); err != nil {
 			return defaultResult, err
 		}
 
-		if err := r.Client.Create(ctx, secret); err != nil {
-			return defaultResult, err
-		}
-
-		repo := cijob.GitRepository(gn, sn.Name)
-
-		if err := r.Client.Delete(ctx, repo); client.IgnoreNotFound(err) != nil {
-			return defaultResult, err
-		}
-
-		if err := r.Client.Create(ctx, repo); err != nil {
+		if err := r.safeCreate(ctx, cijob.GitRepository(gn, sn.Name)); err != nil {
 			return defaultResult, err
 		}
 
