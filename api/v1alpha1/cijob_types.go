@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,25 @@ type CIJobSpec struct {
 	Repository  CIJobRepository `json:"repository"`
 	WorkingDir  string          `json:"workdir"`
 	Environment []string        `json:"environment"`
+}
+
+func (spec CIJobSpec) getEnvFrom() []corev1.EnvVar {
+	env := []corev1.EnvVar{}
+
+	for _, v := range spec.Environment {
+		parts := strings.SplitN(v, "=", 2)
+
+		key := parts[0]
+		var value string
+
+		if len(parts) == 2 {
+			value = parts[1]
+		}
+
+		env = append(env, corev1.EnvVar{Name: key, Value: value})
+	}
+
+	return env
 }
 
 // Validate ensures all the parts work
@@ -133,7 +153,7 @@ func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepos
 					Args:         job.Spec.Command,
 					WorkingDir:   job.Spec.WorkingDir,
 					VolumeMounts: mounts,
-					EnvVar:       makeEnvVar(job.Spec.Environment),
+					Env:          job.Spec.getEnvFrom(),
 				},
 			},
 			Volumes: []corev1.Volume{

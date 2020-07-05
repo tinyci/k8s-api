@@ -38,6 +38,10 @@ spec:
               items:
                 type: string
               type: array
+            environment:
+              items:
+                type: string
+              type: array
             image:
               type: string
             repository:
@@ -56,6 +60,7 @@ spec:
               type: string
           required:
           - command
+          - environment
           - image
           - repository
           - workdir
