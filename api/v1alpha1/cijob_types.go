@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,6 +14,8 @@ import (
 	sourcev1alpha1 "github.com/fluxcd/source-controller/api/v1alpha1"
 )
 
+const unpackImage = "docker.io/tinyci/curltar:latest"
+
 // ErrValidation is for validation errors
 var ErrValidation = errors.New("validation error")
 
@@ -20,10 +23,11 @@ var ErrValidation = errors.New("validation error")
 
 // CIJobSpec defines the desired state of CIJob
 type CIJobSpec struct {
-	Image      string          `json:"image"`
-	Command    []string        `json:"command"`
-	Repository CIJobRepository `json:"repository"`
-	WorkingDir string          `json:"workdir"`
+	Image       string          `json:"image"`
+	Command     []string        `json:"command"`
+	Repository  CIJobRepository `json:"repository"`
+	WorkingDir  string          `json:"workdir"`
+	Environment []string        `json:"environment"`
 }
 
 // Validate ensures all the parts work
@@ -98,7 +102,14 @@ type CIJob struct {
 }
 
 // Pod returns a pod with a spec relative to this CIJob.
-func (job *CIJob) Pod(nsName types.NamespacedName) *corev1.Pod {
+func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepository) *corev1.Pod {
+	mounts := []corev1.VolumeMount{
+		{
+			Name:      "workspace",
+			MountPath: job.Spec.WorkingDir,
+		},
+	}
+
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: nsName.Namespace,
@@ -106,11 +117,33 @@ func (job *CIJob) Pod(nsName types.NamespacedName) *corev1.Pod {
 		},
 		Spec: corev1.PodSpec{
 			RestartPolicy: corev1.RestartPolicyNever,
+			InitContainers: []corev1.Container{
+				{
+					Name:         "git-clone",
+					Image:        unpackImage,
+					Args:         []string{repo.Status.Artifact.URL, job.Spec.WorkingDir},
+					WorkingDir:   job.Spec.WorkingDir,
+					VolumeMounts: mounts,
+				},
+			},
 			Containers: []corev1.Container{
 				{
-					Name:    "ci-run",
-					Image:   job.Spec.Image,
-					Command: job.Spec.Command,
+					Name:         "ci-run",
+					Image:        job.Spec.Image,
+					Args:         job.Spec.Command,
+					WorkingDir:   job.Spec.WorkingDir,
+					VolumeMounts: mounts,
+					EnvVar:       makeEnvVar(job.Spec.Environment),
+				},
+			},
+			Volumes: []corev1.Volume{
+				{
+					Name: "workspace",
+					VolumeSource: corev1.VolumeSource{
+						HostPath: &corev1.HostPathVolumeSource{
+							Path: filepath.Join("/tmp/k8s-runner", nsName.String()),
+						},
+					},
 				},
 			},
 		},

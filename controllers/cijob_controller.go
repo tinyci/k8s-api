@@ -16,8 +16,10 @@ import (
 	objectsv1alpha1 "github.com/tinyci/k8s-api/api/v1alpha1"
 )
 
-var defaultResult = ctrl.Result{}
-var requeueResult = ctrl.Result{Requeue: true}
+var (
+	defaultResult = ctrl.Result{}
+	requeueResult = ctrl.Result{Requeue: true}
+)
 
 // CIJobReconciler reconciles a CIJob object
 type CIJobReconciler struct {
@@ -186,14 +188,14 @@ func (r *CIJobReconciler) buildJob(ctx context.Context, req ctrl.Request, cijob 
 		return err
 	}
 
-	_, err := r.waitForRepository(ctx, gn)
+	repo, err := r.waitForRepository(ctx, gn)
 	if err != nil {
 		return err
 	}
 
 	// FIXME sew artifact into container image
 
-	if err := r.Client.Create(ctx, cijob.Pod(getPodName(req))); err != nil {
+	if err := r.Client.Create(ctx, cijob.Pod(getPodName(req), repo)); err != nil {
 		return err
 	}
 
