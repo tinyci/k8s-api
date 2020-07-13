@@ -190,7 +190,7 @@ func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sou
 			URL:       job.Spec.Repository.URL,
 			Interval:  metav1.Duration{Duration: time.Hour},
 			SecretRef: &corev1.LocalObjectReference{Name: secretName},
-			SourceIgnore: stringPtr(`
+			Ignore: stringPtr(`
 task.yml
 `),
 		},
