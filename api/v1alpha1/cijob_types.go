@@ -77,6 +77,7 @@ type CIJobRepository struct {
 	URL        string `json:"url"`
 	SecretName string `json:"secret_name"`
 	HeadSHA    string `json:"head"`
+	HeadBranch string `json:"branch"`
 }
 
 // Validate validates the repository information
@@ -192,6 +193,7 @@ func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sou
 			Interval:  metav1.Duration{Duration: time.Hour},
 			SecretRef: &corev1.LocalObjectReference{Name: secretName},
 			Reference: &sourcev1alpha1.GitRepositoryRef{
+				Branch: job.Spec.Repository.HeadBranch,
 				Commit: job.Spec.Repository.HeadSHA,
 			},
 			Ignore: stringPtr(`!.git`),

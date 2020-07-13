@@ -48,11 +48,17 @@ spec:
               description: CIJobRepository represents a repository that needs to be
                 cloned for the test to run
               properties:
+                branch:
+                  type: string
+                head:
+                  type: string
                 secret_name:
                   type: string
                 url:
                   type: string
               required:
+              - branch
+              - head
               - secret_name
               - url
               type: object
