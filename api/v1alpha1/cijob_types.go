@@ -76,6 +76,7 @@ func (spec CIJobSpec) Validate() error {
 type CIJobRepository struct {
 	URL        string `json:"url"`
 	SecretName string `json:"secret_name"`
+	HeadSHA    string `json:"head"`
 }
 
 // Validate validates the repository information
@@ -190,9 +191,10 @@ func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sou
 			URL:       job.Spec.Repository.URL,
 			Interval:  metav1.Duration{Duration: time.Hour},
 			SecretRef: &corev1.LocalObjectReference{Name: secretName},
-			Ignore: stringPtr(`
-task.yml
-`),
+			Reference: &sourcev1alpha1.GitRepositoryRef{
+				Commit: job.Spec.Repository.HeadSHA,
+			},
+			Ignore: stringPtr(`!.git`),
 		},
 	}
 }
