@@ -24,11 +24,12 @@ var ErrValidation = errors.New("validation error")
 
 // CIJobSpec defines the desired state of CIJob
 type CIJobSpec struct {
-	Image       string          `json:"image"`
-	Command     []string        `json:"command"`
-	Repository  CIJobRepository `json:"repository"`
-	WorkingDir  string          `json:"workdir"`
-	Environment []string        `json:"environment"`
+	Image       string              `json:"image"`
+	Command     []string            `json:"command"`
+	Repository  CIJobRepository     `json:"repository"`
+	WorkingDir  string              `json:"workdir"`
+	Environment []string            `json:"environment"`
+	Resources   corev1.ResourceList `json:"resources"`
 }
 
 func (spec CIJobSpec) getEnvFrom() []corev1.EnvVar {
@@ -136,6 +137,7 @@ func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepos
 			Name:      nsName.Name,
 		},
 		Spec: corev1.PodSpec{
+			Overhead:      job.Spec.Resources,
 			RestartPolicy: corev1.RestartPolicyNever,
 			InitContainers: []corev1.Container{
 				{
@@ -170,6 +172,10 @@ func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepos
 	}
 }
 
+func stringPtr(str string) *string {
+	return &str
+}
+
 // GitRepository returns a fluxcd/source-controller compatible repository
 // object suitable for programming the source-controller. A secret must already
 // be created in the namespace for the GitRepository, and its name must be
@@ -184,6 +190,9 @@ func (job *CIJob) GitRepository(gn types.NamespacedName, secretName string) *sou
 			URL:       job.Spec.Repository.URL,
 			Interval:  metav1.Duration{Duration: time.Hour},
 			SecretRef: &corev1.LocalObjectReference{Name: secretName},
+			SourceIgnore: stringPtr(`
+task.yml
+`),
 		},
 	}
 }

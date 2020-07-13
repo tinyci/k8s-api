@@ -5,6 +5,7 @@
 package v1alpha1
 
 import (
+	"k8s.io/api/core/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -95,6 +96,13 @@ func (in *CIJobSpec) DeepCopyInto(out *CIJobSpec) {
 		in, out := &in.Environment, &out.Environment
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.Resources != nil {
+		in, out := &in.Resources, &out.Resources
+		*out = make(v1.ResourceList, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val.DeepCopy()
+		}
 	}
 }
 
