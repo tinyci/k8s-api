@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -27,6 +28,45 @@ type CIJobReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+
+	sync.Mutex
+	supervised map[types.NamespacedName]struct{}
+}
+
+// NewCIJobReconciler returns a new reconciler for CI jobs.
+func NewCIJobReconciler(mgr ctrl.Manager) *CIJobReconciler {
+	return &CIJobReconciler{
+		Client:     mgr.GetClient(),
+		Log:        ctrl.Log.WithName("controllers").WithName("CIJob"),
+		Scheme:     mgr.GetScheme(),
+		supervised: map[types.NamespacedName]struct{}{},
+	}
+}
+
+func (r *CIJobReconciler) delSupervised(n types.NamespacedName) error {
+	r.Lock()
+	defer r.Unlock()
+
+	if _, ok := r.supervised[n]; !ok {
+		return errors.New("didn't exist")
+	}
+
+	delete(r.supervised, n)
+
+	return nil
+}
+
+func (r *CIJobReconciler) addSupervised(n types.NamespacedName) error {
+	r.Lock()
+	defer r.Unlock()
+
+	if _, ok := r.supervised[n]; ok {
+		return errors.New("already exists")
+	}
+
+	r.supervised[n] = struct{}{}
+
+	return nil
 }
 
 func (r *CIJobReconciler) getGit(req ctrl.Request) *supervisedGit {
@@ -64,6 +104,9 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
 	log := r.getCIJob(req).Logger()
 
+	log.Info("starting reconcile")
+	defer log.Info("completing reconcile")
+
 	cijob := &objectsv1alpha1.CIJob{}
 
 	if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
@@ -77,13 +120,16 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	}
 
 	pod := &corev1.Pod{}
+	err := r.Get(ctx, r.getPod(req).Name(), pod)
 
-	if err := r.Get(ctx, r.getPod(req).Name(), pod); apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		return defaultResult, r.buildJob(ctx, req)
 	} else if err != nil {
-		return requeueResult, err
+		log.Error(err, "unknown error while retrieving pod")
+		return defaultResult, err
 	} else {
 		// was created and we just restarted
+		log.Info("restarting supervisor for pod", "pod", r.getPod(req).Name())
 		go r.supervisePod(ctx, req)
 	}
 
@@ -153,17 +199,21 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 	intpod := r.getPod(req)
 	podLog := intpod.Logger()
 	podLog.Info("starting status supervisor")
-	errCount := 0
+	if err := r.addSupervised(req.NamespacedName); err != nil {
+		// already supervising.
+		podLog.Info("already supervising this pod")
+		return
+	}
 
-	for errCount < 5 {
-		time.Sleep(5 * time.Second)
+	defer r.delSupervised(req.NamespacedName)
 
+	for {
+		time.Sleep(time.Second)
 		pod := &corev1.Pod{}
 
 		if err := r.Get(ctx, intpod.Name(), pod); err != nil {
 			podLog.Error(err, "error while retrieving ci job pod")
-			errCount++
-			continue
+			return
 		}
 
 		switch pod.Status.Phase {
@@ -172,33 +222,21 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 			if pod.Status.InitContainerStatuses[0].State.Terminated.ExitCode != 0 {
 				podLog.Info("init container did not succeed; trying to rebuild job")
 				if err := r.rebuildJob(ctx, req); err != nil {
-					// FIXME this probably needs to be less dumb with the error handling; I
-					//			 think we can get into some ugly situations without an expiring
-					//			 context, at least.
-					errCount++
-					continue
+					podLog.Error(err, "error rebuilding")
 				}
-			} else {
-				if err := r.recordState(ctx, req, pod); err != nil {
-					errCount++
-					continue
-				}
+			} else if err := r.recordState(ctx, req, pod); err != nil {
+				podLog.Error(err, "recording state", "pod", intpod.Name())
 			}
 
 			return
 		case corev1.PodSucceeded:
 			if err := r.recordState(ctx, req, pod); err != nil {
-				errCount++
-				continue
+				podLog.Error(err, "recording state", "pod", intpod.Name())
 			}
-
-			return
 		default:
 			return
 		}
 	}
-
-	podLog.Info("giving up after 5 errors to reconcile")
 }
 
 func (r *CIJobReconciler) waitForRepository(ctx context.Context, gn types.NamespacedName) (*sourcev1alpha1.GitRepository, error) {

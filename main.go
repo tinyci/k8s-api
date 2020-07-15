@@ -63,11 +63,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.CIJobReconciler{
-		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("CIJob"),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+	if err := controllers.NewCIJobReconciler(mgr).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "CIJob")
 		os.Exit(1)
 	}
