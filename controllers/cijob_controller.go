@@ -233,6 +233,8 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 			if err := r.recordState(ctx, req, pod); err != nil {
 				podLog.Error(err, "recording state", "pod", intpod.Name())
 			}
+
+			return
 		default:
 			return
 		}
