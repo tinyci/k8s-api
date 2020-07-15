@@ -124,6 +124,22 @@ type CIJob struct {
 	Status CIJobStatus `json:"status,omitempty"`
 }
 
+func (job *CIJob) objectMeta(name types.NamespacedName) metav1.ObjectMeta {
+	return metav1.ObjectMeta{
+		Namespace: name.Namespace,
+		Name:      name.Name,
+		OwnerReferences: []metav1.OwnerReference{
+			{
+				APIVersion: job.APIVersion,
+				Kind:       job.Kind,
+				Name:       job.Name,
+				UID:        job.UID,
+			},
+		},
+		Finalizers: []string{metav1.FinalizerDeleteDependents},
+	}
+}
+
 // Pod returns a pod with a spec relative to this CIJob.
 func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepository) *corev1.Pod {
 	mounts := []corev1.VolumeMount{
@@ -134,21 +150,11 @@ func (job *CIJob) Pod(nsName types.NamespacedName, repo *sourcev1alpha1.GitRepos
 	}
 
 	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: nsName.Namespace,
-			Name:      nsName.Name,
-		},
+		ObjectMeta: job.objectMeta(nsName),
 		Spec: corev1.PodSpec{
 			Overhead:      job.Spec.Resources,
 			RestartPolicy: corev1.RestartPolicyNever,
 			InitContainers: []corev1.Container{
-				{
-					Name:         "exit-1",
-					Image:        "bash",
-					Args:         []string{"exit 1"},
-					WorkingDir:   job.Spec.WorkingDir,
-					VolumeMounts: mounts,
-				},
 				{
 					Name:         "git-clone",
 					Image:        unpackImage,
@@ -196,10 +202,7 @@ func stringPtr(str string) *string {
 // passed.
 func (job *CIJob) GitRepository(gn types.NamespacedName) *sourcev1alpha1.GitRepository {
 	return &sourcev1alpha1.GitRepository{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: gn.Namespace,
-			Name:      gn.Name,
-		},
+		ObjectMeta: job.objectMeta(gn),
 		Spec: sourcev1alpha1.GitRepositorySpec{
 			URL:       job.Spec.Repository.URL,
 			Interval:  metav1.Duration{Duration: time.Hour},
