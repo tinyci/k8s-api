@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -67,7 +68,7 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
 		log.Error(err, "encountered err while retrieving record")
-		return requeueResult, err
+		return defaultResult, nil
 	}
 
 	if err := cijob.Validate(); err != nil {
@@ -96,9 +97,60 @@ func (r *CIJobReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func (r *CIJobReconciler) rebuildJob(ctx context.Context, req ctrl.Request) error {
+	podLog := r.getPod(req).Logger()
+	podLog.Info("Pod failed, recreating job")
+
+	cijob := &objectsv1alpha1.CIJob{}
+	if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
+		podLog.Error(err, "pod is in failed state; could not retrieve CI job")
+		return err
+	}
+
+	if err := r.Delete(ctx, cijob); client.IgnoreNotFound(err) != nil {
+		podLog.Error(err, "failed cijob could not be deleted")
+		return err
+	}
+
+	cijob.ResourceVersion = ""
+
+	if err := r.Create(ctx, cijob); err != nil {
+		podLog.Error(err, "failed cijob could not be recreated")
+		return err
+	}
+
+	return nil
+}
+
+func (r *CIJobReconciler) recordState(ctx context.Context, req ctrl.Request, pod *corev1.Pod) error {
+	podLog := r.getPod(req).Logger()
+	state := getState(pod)
+	podLog.Info("Pod finished successfully", "state", state)
+
+	if state != nil {
+		cijob := &objectsv1alpha1.CIJob{}
+		if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
+			podLog.Error(err, "pod is finished; could not retrieve CI job")
+			return err
+		}
+
+		cijob.Status.Finished = true
+		cijob.Status.Success = state.ExitCode == 0
+
+		if err := r.Update(ctx, cijob); err != nil {
+			podLog.Error(err, "error updating cijob with run state")
+			return err
+		}
+
+		return nil
+	}
+
+	podLog.Info("Success was reported; but no state written. This is a bug")
+	return errors.New("state was not reported yet")
+}
+
 func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 	intpod := r.getPod(req)
-
 	podLog := intpod.Logger()
 	podLog.Info("starting status supervisor")
 	errCount := 0
@@ -114,57 +166,36 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 			continue
 		}
 
-		state := getState(pod)
 		switch pod.Status.Phase {
 		case corev1.PodPending:
 		case corev1.PodFailed:
-			podLog.Info("Pod failed, recreating job")
-			cijob := &objectsv1alpha1.CIJob{}
-			if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
-				podLog.Error(err, "pod is in failed state; could not retrieve CI job")
-				errCount++
-				goto end
-			}
-
-			if err := r.Delete(ctx, cijob); client.IgnoreNotFound(err) != nil {
-				podLog.Error(err, "failed cijob could not be deleted")
-				errCount++
-				goto end
-			}
-
-			cijob.ResourceVersion = ""
-
-			if err := r.Create(ctx, cijob); err != nil {
-				podLog.Error(err, "failed cijob could not be recreated")
-				errCount++
-				goto end
+			if pod.Status.InitContainerStatuses[0].State.Terminated.ExitCode != 0 {
+				podLog.Info("init container did not succeed; trying to rebuild job")
+				if err := r.rebuildJob(ctx, req); err != nil {
+					// FIXME this probably needs to be less dumb with the error handling; I
+					//			 think we can get into some ugly situations without an expiring
+					//			 context, at least.
+					errCount++
+					continue
+				}
+			} else {
+				if err := r.recordState(ctx, req, pod); err != nil {
+					errCount++
+					continue
+				}
 			}
 
 			return
 		case corev1.PodSucceeded:
-			if state != nil {
-				cijob := &objectsv1alpha1.CIJob{}
-				if err := r.Get(ctx, req.NamespacedName, cijob); err != nil {
-					podLog.Error(err, "pod is finished; could not retrieve CI job")
-					errCount++
-					goto end
-				}
-
-				cijob.Status.Finished = true
-				cijob.Status.Success = state.ExitCode == 0
-
-				if err := r.Update(ctx, cijob); err != nil {
-					podLog.Error(err, "error updating cijob with run state")
-					errCount++
-					goto end
-				}
-
-				return
+			if err := r.recordState(ctx, req, pod); err != nil {
+				errCount++
+				continue
 			}
+
+			return
 		default:
 			return
 		}
-	end:
 	}
 
 	podLog.Info("giving up after 5 errors to reconcile")
@@ -206,7 +237,7 @@ func (r *CIJobReconciler) buildJob(ctx context.Context, req ctrl.Request) error 
 		return err
 	}
 
-	if err := r.Create(ctx, cijob.GitRepository(git.Name())); err != nil {
+	if err := r.Create(ctx, cijob.GitRepository(git.Name())); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 
@@ -215,7 +246,7 @@ func (r *CIJobReconciler) buildJob(ctx context.Context, req ctrl.Request) error 
 		return err
 	}
 
-	if err := r.Client.Create(ctx, cijob.Pod(pod.Name(), repo)); err != nil {
+	if err := r.Create(ctx, cijob.Pod(pod.Name(), repo)); err != nil {
 		return err
 	}
 
