@@ -127,7 +127,9 @@ func (r *CIJobReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	} else if err != nil {
 		log.Error(err, "unknown error while retrieving pod")
 		return defaultResult, err
-	} else {
+	}
+
+	if !cijob.Status.Finished {
 		// was created and we just restarted
 		log.Info("restarting supervisor for pod", "pod", r.getPod(req).Name())
 		go r.supervisePod(ctx, req)
@@ -204,11 +206,9 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 		podLog.Info("already supervising this pod")
 		return
 	}
-
 	defer r.delSupervised(req.NamespacedName)
 
 	for {
-		time.Sleep(time.Second)
 		pod := &corev1.Pod{}
 
 		if err := r.Get(ctx, intpod.Name(), pod); err != nil {
@@ -224,20 +224,20 @@ func (r *CIJobReconciler) supervisePod(ctx context.Context, req ctrl.Request) {
 				if err := r.rebuildJob(ctx, req); err != nil {
 					podLog.Error(err, "error rebuilding")
 				}
+				return
 			} else if err := r.recordState(ctx, req, pod); err != nil {
 				podLog.Error(err, "recording state", "pod", intpod.Name())
 			}
 
-			return
 		case corev1.PodSucceeded:
 			if err := r.recordState(ctx, req, pod); err != nil {
 				podLog.Error(err, "recording state", "pod", intpod.Name())
+			} else {
+				return
 			}
-
-			return
 		default:
-			return
 		}
+		time.Sleep(time.Second)
 	}
 }
 
