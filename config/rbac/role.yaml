@@ -6,6 +6,16 @@ metadata:
   creationTimestamp: null
   name: manager-role
 rules:
+- resources:
+  - pods
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - objects.tinyci.org
   resources:
@@ -26,3 +36,15 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - source.fluxcd.io
+  resources:
+  - gitrepositories
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
